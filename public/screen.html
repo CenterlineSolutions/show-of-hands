@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Poll screen</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/theme.css">
+</head>
+<body>
+<div class="stage">
+  <div class="stage-top"><span class="brand"></span><span id="chip"></span></div>
+  <div class="stage-body">
+    <aside class="stage-side" id="side" hidden></aside>
+    <div class="stage-main" id="main"></div>
+  </div>
+  <div class="stage-foot"><span id="foot-left"></span><span id="foot-right"></span></div>
+</div>
+<script src="/common.js"></script>
+<script>
+const code = (new URLSearchParams(location.search).get('s') || '').toUpperCase();
+const main = $('#main'), chip = $('#chip');
+// ?layout=split puts the QR code on the left and the results on the right, so one window (or one slide) does both.
+const split = new URLSearchParams(location.search).get('layout') === 'split';
+if (split) {
+  document.querySelector('.stage').classList.add('split');
+  if (code) {
+    const side = $('#side');
+    side.hidden = false;
+    side.append(
+      h('div', { class: 'qr-card' }, h('img', { src: '/qr.svg?s=' + encodeURIComponent(code), alt: 'QR code to join the poll' })),
+      h('div', { class: 'scan' }, 'Scan to join'),
+      h('div', { class: 'join-url' }, (location.origin + '/?s=' + code).replace(/^https?:\/\//, '')));
+  }
+}
+if (!code) {
+  main.append(h('h1', {}, 'Which session?'), h('form', { class: 'code-form', style: 'max-width:360px', onsubmit: e => { e.preventDefault(); location.search = '?s=' + $('input', e.target).value.trim(); } },
+    h('input', { maxlength: 8, 'aria-label': 'Session code', autocomplete: 'off' }), h('button', { class: 'btn primary' }, 'Open screen')));
+} else {
+  let barsApi = null, shownQuestion = null, optionsOrder = null;
+  const setChip = (text, cls) => chip.replaceChildren(text ? h('span', { class: 'chip ' + cls }, text) : '');
+  connect({ role: 'screen', s: code }, msg => {
+    if (msg.type === 'state') render(msg);
+    else if (msg.type === 'tally' && barsApi && msg.questionId === shownQuestion) $('#foot-right').textContent = fmtTotal(barsApi.update(msg.counts));
+  });
+  const fmtTotal = n => (n === 1 ? '1 vote' : n + ' votes');
+
+  function render(st) {
+    const s = st.session;
+    document.title = s.name;
+    $('#foot-left').textContent = st.index && s.state === 'live' && s.showProgress ? `Question ${st.index} of ${st.total}` : s.name;
+    if (s.state !== 'live' || !st.question) {
+      barsApi = null; shownQuestion = null;
+      setChip('');
+      $('#foot-right').textContent = '';
+      if (s.state === 'ended') return main.replaceChildren(h('h1', {}, 'Thanks for playing along.'));
+      if (split) return main.replaceChildren(h('h1', {}, 'The poll starts soon'), h('p', { class: 'split-note' }, 'Scan the code to join. Questions appear here when the speaker is ready.'));
+      const join = location.origin + '/?s=' + s.code;
+      return main.replaceChildren(h('div', { class: 'lobby' },
+        h('div', { class: 'qr-card' }, h('img', { src: '/qr.svg?s=' + encodeURIComponent(s.code), alt: 'QR code to join the poll' })),
+        h('div', { style: 'display:grid;gap:18px' },
+          h('h1', {}, 'Scan to join the poll'),
+          h('p', {}, 'Or go to'),
+          h('div', { class: 'join-url' }, join.replace(/^https?:\/\//, '')),
+          h('p', {}, 'Keep the page open. Questions arrive when the speaker is ready.'))));
+    }
+    const qn = st.question;
+    if (shownQuestion !== qn.id) {
+      shownQuestion = qn.id;
+      const wrap = h('div', { class: 'bars' });
+      main.replaceChildren(h('h1', {}, qn.text), wrap);
+      barsApi = createBars(wrap, qn.options, { showCounts: false });
+    }
+    if (s.phase === 'open') setChip('Voting open', 'open');
+    else if (s.phase === 'closed') setChip('Voting closed', 'closed');
+    else setChip('Voting opens soon', '');
+    if (st.tally) $('#foot-right').textContent = fmtTotal(barsApi.update(st.tally.counts));
+  }
+}
+</script>
+</body>
+</html>

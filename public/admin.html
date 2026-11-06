@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/theme.css">
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <span class="brand" data-suffix=" &middot; Admin"></span>
+    <nav class="nav" id="nav">
+      <a href="/host">Host</a>
+      <button data-tab="sessions">Sessions</button>
+      <button data-tab="polls">Questions</button>
+      <button data-tab="brand">Branding</button>
+      <button data-tab="account">Account</button>
+      <button id="logout">Sign out</button>
+    </nav>
+  </div>
+  <div id="root"></div>
+</div>
+<script src="/color.js"></script>
+<script src="/common.js"></script>
+<script>
+const root = $('#root');
+let tab = 'sessions';
+document.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { tab = b.dataset.tab; show(); }));
+$('#logout').addEventListener('click', async () => { await api('/api/logout', 'POST'); location.href = '/login'; });
+const flash = (el, msg, bad) => { el.textContent = msg; el.className = bad ? 'err-text' : 'ok-text'; };
+
+function show() {
+  document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  ({ sessions: sessionsTab, polls: pollsTab, brand: brandTab, account: accountTab })[tab]();
+}
+
+/* ---------------- sessions ---------------- */
+async function sessionsTab() {
+  const [sessions, polls] = await Promise.all([api('/api/admin/sessions'), api('/api/admin/polls')]);
+  const err = h('p', { class: 'err-text', role: 'alert' });
+  const name = h('input', { id: 'sn', required: true, placeholder: 'e.g. Spring conference keynote' });
+  const poll = h('select', { id: 'sp' }, polls.map(p => h('option', { value: p.id }, p.title)));
+  const date = h('input', { id: 'sd', type: 'date' });
+  const prog = h('input', { type: 'checkbox', id: 'spg', checked: true });
+  const create = h('form', { class: 'panel', onsubmit: async e => { e.preventDefault(); try { await api('/api/admin/sessions', 'POST', { name: name.value, pollId: poll.value, eventDate: date.value, showProgress: prog.checked }); show(); } catch (x) { err.textContent = x.message; } } },
+    h('h2', {}, 'Create a session'),
+    h('p', { class: 'muted' }, 'A session gets its own join code and QR code right away, so you can put the QR in the speaker’s deck before the event.'),
+    h('div', { class: 'field' }, h('label', { for: 'sn' }, 'Session name'), name),
+    h('div', { class: 'row' }, h('div', { class: 'field grow' }, h('label', { for: 'sp' }, 'Poll'), poll), h('div', { class: 'field' }, h('label', { for: 'sd' }, 'Event date (optional)'), date)),
+    h('div', { class: 'field' }, h('label', { for: 'spg', style: 'display:flex;gap:8px;align-items:center;font-weight:600' }, prog, 'Show \u201cQuestion 3 of 7\u201d to the audience'), h('span', { class: 'hint' }, 'Applies to the big screen and phones. You can change it later, even during the event.')),
+    err, h('button', { class: 'btn primary' }, 'Create session'));
+
+  const list = sessions.length ? sessions.map(s => h('div', { class: 'item' },
+    h('div', { class: 'head' },
+      h('div', {}, h('h3', {}, s.name), h('div', { class: 'muted' }, `${s.pollTitle}${s.eventDate ? ' · ' + s.eventDate : ''} · ${s.state} · ${s.votes} votes`)),
+      h('span', { class: 'code' }, s.code)),
+    h('label', { style: 'display:flex;gap:8px;align-items:center;margin-top:10px;font-size:14px' }, h('input', { type: 'checkbox', checked: s.showProgress, onchange: async e => { try { await api('/api/admin/sessions/' + s.id, 'PATCH', { showProgress: e.target.checked }); } catch { e.target.checked = !e.target.checked; } } }), 'Show question number (\u201cQuestion 3 of 7\u201d)'),
+    h('div', { class: 'row', style: 'margin-top:10px' },
+      h('a', { class: 'btn primary small', href: '/host?s=' + s.code, style: 'text-decoration:none' }, 'Run session'),
+      h('a', { class: 'btn small', href: '/screen?s=' + s.code, target: '_blank', rel: 'noopener', style: 'text-decoration:none' }, 'Big screen'),
+      h('a', { class: 'btn small', href: '/screen?layout=split&s=' + s.code, target: '_blank', rel: 'noopener', style: 'text-decoration:none' }, 'Split screen'),
+      h('a', { class: 'btn small', href: '/qrpage?s=' + s.code, target: '_blank', rel: 'noopener', style: 'text-decoration:none' }, 'QR slide'),
+      h('a', { class: 'btn small', href: `/qr.png?s=${s.code}&download=1`, style: 'text-decoration:none' }, 'Download QR (PNG)'),
+      h('a', { class: 'btn small', href: `/qr.svg?s=${s.code}`, download: `poll-${s.code}.svg`, style: 'text-decoration:none' }, 'Download QR (SVG)'),
+      h('a', { class: 'btn small', href: `/api/admin/sessions/${s.id}/results.csv`, style: 'text-decoration:none' }, 'Results CSV'),
+      h('button', { class: 'btn small', onclick: async () => { if (confirm('Delete all votes for this session? This cannot be undone.')) { await api(`/api/admin/sessions/${s.id}/clear-votes`, 'POST'); show(); } } }, 'Clear votes'),
+      h('button', { class: 'btn small danger', onclick: async () => { if (confirm(`Delete session "${s.name}" and its votes?`)) { await api('/api/admin/sessions/' + s.id, 'DELETE'); show(); } } }, 'Delete')))) : [h('p', { class: 'muted' }, 'No sessions yet.')];
+  root.replaceChildren(create, h('div', { class: 'panel' }, h('h2', {}, 'Sessions'), h('div', { class: 'list' }, list)));
+}
+
+/* ---------------- polls & questions ---------------- */
+async function pollsTab() {
+  const polls = await api('/api/admin/polls');
+  const err = h('p', { class: 'err-text', role: 'alert' });
+  const title = h('input', { id: 'pt', required: true, placeholder: 'Poll title' });
+  const newPoll = h('form', { class: 'panel', onsubmit: async e => { e.preventDefault(); try { await api('/api/admin/polls', 'POST', { title: title.value }); show(); } catch (x) { err.textContent = x.message; } } },
+    h('h2', {}, 'New poll'), h('div', { class: 'row' }, h('div', { class: 'field grow', style: 'margin:0' }, h('label', { class: 'sr-only', for: 'pt' }, 'Poll title'), title), h('button', { class: 'btn primary' }, 'Create poll')), err);
+  root.replaceChildren(newPoll, ...polls.map(pollPanel));
+}
+
+function pollPanel(p) {
+  const panel = h('div', { class: 'panel' });
+  const redraw = np => { panel.replaceWith(pollPanel(np)); };
+  const err = h('p', { class: 'err-text', role: 'alert' });
+  const guard = fn => async (...a) => { try { err.textContent = ''; await fn(...a); } catch (x) { err.textContent = x.message; } };
+  const titleIn = h('input', { value: p.title, 'aria-label': 'Poll title' });
+  panel.append(
+    h('div', { class: 'row' }, h('div', { class: 'field grow', style: 'margin:0' }, titleIn),
+      h('button', { class: 'btn small', onclick: guard(async () => redraw(await api('/api/admin/polls/' + p.id, 'PUT', { title: titleIn.value }))) }, 'Save title'),
+      h('button', { class: 'btn small', onclick: guard(async () => { await api(`/api/admin/polls/${p.id}/duplicate`, 'POST'); show(); }) }, 'Duplicate poll'),
+      h('button', { class: 'btn small danger', onclick: guard(async () => { if (confirm(`Delete poll "${p.title}", its questions, and any sessions using it?`)) { await api('/api/admin/polls/' + p.id, 'DELETE'); show(); } }) }, 'Delete poll')),
+    h('div', { class: 'list', style: 'margin:16px 0' }, p.questions.map((qu, i) => questionItem(p, qu, i, redraw, guard))),
+    h('h3', { style: 'margin:8px 0' }, 'Add a question'), questionForm(null, async body => redraw(await api(`/api/admin/polls/${p.id}/questions`, 'POST', body)), guard, 'Add question'), err);
+  return panel;
+}
+
+function questionItem(p, qu, i, redraw, guard) {
+  const box = h('div', { class: 'item' });
+  const viewMode = () => {
+    box.replaceChildren(
+      h('div', { class: 'head' }, h('div', { class: 'grow' }, h('strong', {}, `${i + 1}. ${qu.text}`), h('ol', {}, qu.options.map(o => h('li', {}, o.label)))),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn small', 'aria-label': 'Move up', disabled: i === 0, onclick: guard(async () => redraw(await api(`/api/admin/questions/${qu.id}/move`, 'POST', { dir: 'up' }))) }, '↑'),
+          h('button', { class: 'btn small', 'aria-label': 'Move down', disabled: i === p.questions.length - 1, onclick: guard(async () => redraw(await api(`/api/admin/questions/${qu.id}/move`, 'POST', { dir: 'down' }))) }, '↓'),
+          h('button', { class: 'btn small', onclick: editMode }, 'Edit'),
+          h('button', { class: 'btn small danger', onclick: guard(async () => { if (confirm('Delete this question and its votes?')) redraw(await api('/api/admin/questions/' + qu.id, 'DELETE')); }) }, 'Delete'))));
+  };
+  const editMode = () => box.replaceChildren(questionForm(qu, async body => redraw(await api('/api/admin/questions/' + qu.id, 'PUT', body)), guard, 'Save question', viewMode));
+  viewMode();
+  return box;
+}
+
+function questionForm(qu, onSave, guard, label, onCancel) {
+  const text = h('textarea', { rows: 2, 'aria-label': 'Question text', placeholder: 'Question text' }, qu ? qu.text : '');
+  const opts = h('textarea', { rows: 5, 'aria-label': 'Answer choices', placeholder: 'One answer per line' }, qu ? qu.options.map(o => o.label).join('\n') : '');
+  return h('div', {},
+    h('div', { class: 'field' }, h('label', {}, 'Question'), text),
+    h('div', { class: 'field' }, h('label', {}, 'Answer choices'), opts, h('span', { class: 'hint' }, 'One per line, in the order voters see them. Voters pick one. Editing wording keeps existing votes; removing a line removes its votes.')),
+    h('div', { class: 'row' },
+      h('button', { class: 'btn primary small', onclick: guard(() => onSave({ text: text.value, options: opts.value.split('\n') })) }, label),
+      onCancel ? h('button', { class: 'btn small', onclick: onCancel }, 'Cancel') : null));
+}
+
+/* ---------------- branding ---------------- */
+async function brandTab() {
+  const b = await api('/api/brand');
+  const msg = h('p', { role: 'alert' });
+  const name = h('input', { id: 'bn', value: b.name, maxlength: 80 });
+  const showName = h('input', { type: 'checkbox', id: 'sn2', checked: b.showName });
+  const file = h('input', { id: 'bf', type: 'file', accept: 'image/png,image/jpeg,image/webp,image/svg+xml' });
+  const preview = b.logo ? h('img', { src: '/brand/logo?v=' + b.v, alt: 'Current logo', style: 'max-height:80px;max-width:280px;display:block;margin-bottom:10px' }) : h('p', { class: 'muted' }, 'No logo uploaded.');
+  const col = b.colors;
+  const inputs = {
+    primary: h('input', { type: 'color', id: 'cl1', value: col.primary, style: 'width:72px;height:44px;padding:3px' }),
+    dark: h('input', { type: 'color', id: 'cl2', value: col.dark, style: 'width:72px;height:44px;padding:3px' }),
+    light: h('input', { type: 'color', id: 'cl3', value: col.light, style: 'width:72px;height:44px;padding:3px' }),
+  };
+  const checksBox = h('div', { style: 'display:grid;gap:6px;margin:12px 0' });
+  const current = () => ({ primary: inputs.primary.value, dark: inputs.dark.value, light: inputs.light.value });
+  const renderChecks = () => checksBox.replaceChildren(...Color.checks(current()).map(c => {
+    const ok = c.ratio >= c.min;
+    return h('div', { style: 'display:flex;gap:10px;align-items:baseline' },
+      h('strong', { class: ok ? 'ok-text' : 'err-text', style: 'min-width:3.2em' }, ok ? 'Pass' : 'Low'),
+      h('span', { style: 'flex:1' }, `${c.label}: ${c.ratio.toFixed(1)}:1 (needs ${c.min}:1)`));
+  }));
+  Object.values(inputs).forEach(i => i.addEventListener('input', renderChecks));
+  renderChecks();
+  const refreshTheme = () => { const l = document.querySelector('link[href^="/theme.css"]'); if (l) l.href = '/theme.css?' + Date.now(); };
+  const colorField = (id, input, label, hint) => h('div', { class: 'field' }, h('label', { for: id }, label), h('div', { class: 'row' }, input, h('span', { class: 'hint' }, hint)));
+  const colorBlock = h('div', {},
+    h('h3', { style: 'margin:22px 0 10px' }, 'Colors'),
+    colorField('cl1', inputs.primary, 'Main color', 'Buttons, the leading answer bar, highlights.'),
+    colorField('cl2', inputs.dark, 'Dark color', 'Big-screen background and text on phones.'),
+    colorField('cl3', inputs.light, 'Light color', 'Background of phone, host and admin pages.'),
+    h('p', { class: 'hint', style: 'margin:0' }, 'Readability checks update as you pick. Aim for all Pass before the event.'), checksBox,
+    h('div', { class: 'row' },
+      h('button', { class: 'btn primary small', onclick: async () => { try { await api('/api/admin/brand/colors', 'PUT', current()); refreshTheme(); flash(msg, 'Colors saved.'); } catch (x) { flash(msg, x.message, true); } } }, 'Save colors'),
+      h('button', { class: 'btn small', onclick: async () => { await api('/api/admin/brand/colors', 'DELETE'); refreshTheme(); brandTab(); } }, 'Reset to original colors')));
+  root.replaceChildren(h('div', { class: 'panel', style: 'max-width:560px' },
+    h('h2', {}, 'Branding'),
+    h('p', { class: 'muted' }, 'Shown at the top of every page: the voter\u2019s phone, the big screen, host and admin.'),
+    h('div', { class: 'field' }, h('label', { for: 'bn' }, 'Organization name'), name),
+    b.logo ? h('div', { class: 'field' }, h('label', { for: 'sn2', style: 'display:flex;gap:8px;align-items:center;font-weight:600' }, showName, 'Show the name next to the logo'), h('span', { class: 'hint' }, 'Turn this off if your logo already includes the name.')) : null,
+    h('div', { class: 'row' }, h('button', { class: 'btn primary small', onclick: async () => { try { await api('/api/admin/brand', 'PUT', { name: name.value, showName: showName.checked }); await applyBrand(); flash(msg, 'Name saved.'); } catch (x) { flash(msg, x.message, true); } } }, 'Save name')),
+    h('h3', { style: 'margin:22px 0 10px' }, 'Logo'), preview,
+    h('div', { class: 'field' }, h('label', { for: 'bf' }, 'Upload a logo'), file, h('span', { class: 'hint' }, 'PNG, JPG, WebP or SVG, under 1 MB. A wide logo on a transparent or white background works best. It sits on a white tile on the big screen so dark logos stay readable.')),
+    h('div', { class: 'row' },
+      h('button', { class: 'btn primary small', onclick: async () => {
+        const f = file.files[0];
+        if (!f) return flash(msg, 'Choose a file first.', true);
+        try {
+          const r = await fetch('/api/admin/brand/logo', { method: 'POST', headers: { 'Content-Type': f.type }, body: f, credentials: 'same-origin' });
+          const j = await r.json(); if (!r.ok) throw new Error(j.error);
+          await applyBrand(); brandTab(); 
+        } catch (x) { flash(msg, x.message, true); }
+      } }, 'Upload logo'),
+      b.logo ? h('button', { class: 'btn small danger', onclick: async () => { await api('/api/admin/brand/logo', 'DELETE'); await applyBrand(); brandTab(); } }, 'Remove logo') : null),
+    colorBlock, msg));
+}
+
+/* ---------------- account ---------------- */
+async function accountTab() {
+  const me = await api('/api/me');
+  const msg = h('p', { role: 'alert' });
+  const cur = h('input', { type: 'password', id: 'cp', autocomplete: 'current-password' });
+  const nw = h('input', { type: 'password', id: 'np', autocomplete: 'new-password' });
+  root.replaceChildren(h('form', { class: 'panel', style: 'max-width:440px', onsubmit: async e => { e.preventDefault(); try { await api('/api/password', 'POST', { current: cur.value, next: nw.value }); cur.value = nw.value = ''; flash(msg, 'Password changed.'); } catch (x) { flash(msg, x.message, true); } } },
+    h('h2', {}, 'Account'), h('p', { class: 'muted' }, `Signed in as ${me.username}.`),
+    h('div', { class: 'field' }, h('label', { for: 'cp' }, 'Current password'), cur),
+    h('div', { class: 'field' }, h('label', { for: 'np' }, 'New password'), nw, h('span', { class: 'hint' }, 'At least 12 characters. Several random words strung together works well. Changing it signs out every other browser.')),
+    msg, h('button', { class: 'btn primary' }, 'Change password')),
+    h('div', { class: 'panel', style: 'max-width:440px' }, h('h3', { style: 'margin-bottom:8px' }, 'Connection check'),
+      h('p', { class: 'muted', style: 'margin-top:0' }, 'Confirms the server sees your real address through the web server. If it says the proxy header is missing, tell whoever manages the site.'),
+      h('button', { class: 'btn small', onclick: async e => { const out = e.target.nextElementSibling; try { const d = await api('/api/admin/debug/ip'); out.textContent = `Server sees ${d.ip} over ${d.protocol}. Proxy header: ${d.proxyHeaderSeen ? 'present (good)' : 'missing'}.`; out.className = d.proxyHeaderSeen ? 'ok-text' : 'err-text'; } catch (x) { out.textContent = x.message; out.className = 'err-text'; } } }, 'Check now'),
+      h('p', { style: 'margin:10px 0 0' })));
+}
+
+show();
+</script>
+</body>
+</html>

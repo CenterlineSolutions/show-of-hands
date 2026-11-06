@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Poll QR slide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/theme.css">
+</head>
+<body>
+<div class="qr-slide">
+  <div>
+    <div class="qr-card"><img id="qr" alt="QR code to join the poll"></div>
+    <h1 style="font-size:clamp(28px,4vw,56px)">Scan to join the poll</h1>
+    <p class="mono" id="url" style="font-size:clamp(18px,2.4vw,36px);color:var(--hook-bright);margin:12px 0 0"></p>
+  </div>
+</div>
+<script src="/common.js"></script>
+<script>
+const code = (new URLSearchParams(location.search).get('s') || '').toUpperCase();
+$('#qr').src = '/qr.svg?s=' + encodeURIComponent(code);
+api('/api/join/' + encodeURIComponent(code)).then(j => { $('#url').textContent = j.url.replace(/^https?:\/\//, ''); document.title = j.name + ' QR'; }).catch(() => { $('#url').textContent = 'Session not found'; });
+</script>
+</body>
+</html>

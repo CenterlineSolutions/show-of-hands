@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#15123a">
+<title>Join the poll</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/theme.css">
+</head>
+<body>
+<div class="voter">
+  <header><span class="brand"></span><span class="progress" id="progress" aria-live="polite"></span></header>
+  <main id="view" aria-live="polite"></main>
+</div>
+<script src="/common.js"></script>
+<script>
+const view = $('#view'), progress = $('#progress');
+const params = new URLSearchParams(location.search);
+const code = (params.get('s') || '').toUpperCase();
+
+let token = '';
+try { token = localStorage.getItem('voterToken') || ''; } catch {}
+if (!token) {
+  token = Array.from(crypto.getRandomValues(new Uint8Array(18)), b => b.toString(16).padStart(2, '0')).join('');
+  try { localStorage.setItem('voterToken', token); } catch {}
+}
+
+if (!code) {
+  document.title = 'Join the poll';
+  view.append(
+    h('h1', {}, 'Enter your session code'),
+    h('p', { class: 'note' }, 'Scan the QR code on screen, or type the 5-character code shown there.'),
+    h('form', { class: 'code-form', onsubmit: e => { e.preventDefault(); const v = $('input', e.target).value.trim(); if (v) location.search = '?s=' + encodeURIComponent(v); } },
+      h('label', { class: 'sr-only', for: 'c' }, 'Session code'),
+      h('input', { id: 'c', maxlength: 8, autocomplete: 'off', autocapitalize: 'characters', inputmode: 'text' }),
+      h('button', { class: 'btn primary', type: 'submit' }, 'Join')));
+} else {
+  start();
+}
+
+function start() {
+  let state = null, mineId = null, bars = null, barsFor = null, lastError = '';
+  const conn = connect({ role: 'voter', s: code, t: token }, msg => {
+    if (msg.type === 'state') { state = msg; mineId = msg.mine ?? null; lastError = ''; render(); }
+    else if (msg.type === 'ack') {
+      if (msg.ok) { mineId = msg.optionId; lastError = ''; }
+      else { lastError = msg.error; if (msg.optionId) mineId = msg.optionId; }
+      render();
+    }
+  });
+
+  function show(...kids) { view.replaceChildren(...kids.filter(Boolean)); }
+  function render() {
+    if (!state) return;
+    const s = state.session;
+    document.title = s.name;
+    progress.textContent = state.index && s.state === 'live' && s.showProgress ? `Question ${state.index} of ${state.total}` : '';
+    const err = lastError ? h('div', { class: 'banner err', role: 'alert' }, lastError) : null;
+
+    if (s.state === 'scheduled') return show(h('h1', {}, s.name), h('div', { class: 'waiting-dots', 'aria-hidden': 'true' }, h('span', {}, '●'), h('span', {}, '●'), h('span', {}, '●')), h('p', { class: 'note' }, 'You’re in. The poll starts soon. Keep this page open and the first question will appear on its own.'));
+    if (s.state === 'ended' || s.phase === 'done') return show(h('h1', {}, 'That’s the last question.'), h('p', { class: 'note' }, 'Thanks for voting. You can close this page.'));
+
+    const qn = state.question;
+    if (s.phase === 'waiting' || !qn) {
+      return show(h('div', { class: 'waiting-dots', 'aria-hidden': 'true' }, h('span', {}, '●'), h('span', {}, '●'), h('span', {}, '●')),
+        h('h1', {}, 'Next question coming up'), h('p', { class: 'note' }, 'Voting opens when the speaker is ready. This page updates by itself.'));
+    }
+    if (s.phase === 'open') {
+      const buttons = qn.options.map(o => h('button', {
+        class: 'choice' + (mineId === o.id ? ' picked' : mineId ? ' dim' : ''),
+        type: 'button', disabled: mineId ? true : false,
+        onclick: () => { conn.send({ type: 'vote', optionId: o.id }); },
+      }, o.label));
+      return show(h('h1', {}, qn.text), h('div', { class: 'choices' }, buttons), err,
+        mineId ? h('div', { class: 'banner' }, 'Vote received. Results appear when the speaker closes voting.') : null);
+    }
+    // closed: show results
+    const wrap = h('div', { class: 'bars' });
+    show(h('h1', {}, qn.text), wrap, h('p', { class: 'note', id: 'tot' }));
+    bars = createBars(wrap, qn.options, { showCounts: false });
+    const total = bars.update(state.tally ? state.tally.counts : {}, mineId);
+    $('#tot').textContent = total === 1 ? '1 vote' : `${total} votes`;
+  }
+}
+</script>
+</body>
+</html>

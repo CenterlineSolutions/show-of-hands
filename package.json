@@ -1,0 +1,32 @@
+{
+  "name": "show-of-hands",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted live polling: scan a QR code, answer one question at a time when the host opens voting.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node seed.js",
+    "loadtest": "node loadtest.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.0.0",
+    "express": "^4.21.0",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
+  },
+  "license": "MIT",
+  "author": "Centerline Solutions",
+  "keywords": [
+    "polling",
+    "live-poll",
+    "qr-code",
+    "audience-response",
+    "self-hosted",
+    "websocket",
+    "sqlite"
+  ]
+}

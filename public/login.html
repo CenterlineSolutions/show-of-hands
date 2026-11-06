@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/theme.css">
+</head>
+<body>
+<div class="login-wrap">
+  <form class="panel" id="f">
+    <p class="brand" style="margin:0 0 14px"></p>
+    <h2>Sign in</h2>
+    <div class="field"><label for="u">Username</label><input id="u" autocomplete="username" required autofocus></div>
+    <div class="field"><label for="p">Password</label><input id="p" type="password" autocomplete="current-password" required></div>
+    <p class="err-text" id="err" role="alert"></p>
+    <button class="btn primary" style="width:100%">Sign in</button>
+  </form>
+</div>
+<script src="/common.js"></script>
+<script>
+$('#f').addEventListener('submit', async e => {
+  e.preventDefault();
+  try {
+    await api('/api/login', 'POST', { username: $('#u').value, password: $('#p').value });
+    const next = new URLSearchParams(location.search).get('next') || '/admin';
+    location.href = next.startsWith('/') && !next.startsWith('//') ? next : '/admin';
+  } catch (err) { $('#err').textContent = err.message; }
+});
+</script>
+</body>
+</html>

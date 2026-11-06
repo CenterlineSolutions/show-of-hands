@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Host console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=DM+Mono:wght@400;500&family=Instrument+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/theme.css">
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <span class="brand" data-suffix=" &middot; Host"></span>
+    <nav class="nav"><a href="/host" aria-current="page">Host</a><a href="/admin">Admin</a></nav>
+  </div>
+  <div id="root"></div>
+</div>
+<script src="/common.js"></script>
+<script>
+const root = $('#root');
+const code = (new URLSearchParams(location.search).get('s') || '').toUpperCase();
+code ? console_(code) : picker();
+
+async function picker() {
+  const sessions = (await api('/api/admin/sessions')).filter(s => s.state !== 'ended');
+  root.replaceChildren(h('div', { class: 'panel' }, h('h2', {}, 'Choose a session'),
+    sessions.length ? h('div', { class: 'list' }, sessions.map(s => h('div', { class: 'item' }, h('div', { class: 'head' },
+      h('div', {}, h('h3', {}, s.name), h('div', { class: 'muted' }, `${s.pollTitle} · ${s.state}${s.eventDate ? ' · ' + s.eventDate : ''}`)),
+      h('a', { class: 'btn primary small', href: '/host?s=' + s.code, style: 'text-decoration:none;display:inline-flex;align-items:center' }, 'Run this session')))))
+    : h('p', { class: 'muted' }, 'No sessions yet. Create one in Admin first.')));
+}
+
+function console_(code) {
+  let st = null, barsApi = null, shownQ = null;
+  const conn = connect({ role: 'host', s: code }, msg => {
+    if (msg.type === 'state') { st = msg; render(); }
+    else if (msg.type === 'tally' && barsApi && msg.questionId === shownQ) $('#votes').textContent = total(barsApi.update(msg.counts));
+  }, ok => { const c = $('#conn'); if (c) c.textContent = ok ? 'Connected' : 'Reconnecting…'; });
+  const total = n => (n === 1 ? '1 vote' : n + ' votes');
+  const act = async (a, body) => { try { await api(`/api/host/${code}/${a}`, 'POST', body || {}); $('#err').textContent = ''; } catch (e) { $('#err').textContent = e.message; } };
+
+  root.replaceChildren(
+    h('div', { class: 'panel' },
+      h('div', { class: 'row' }, h('h2', { id: 'title', class: 'grow', style: 'margin:0' }, 'Loading…'), h('span', { id: 'chip' }), h('span', { class: 'code', id: 'codeBadge' }, code)),
+      h('div', { class: 'row', style: 'margin-top:12px' },
+        h('a', { class: 'btn small', href: '/screen?s=' + code, target: '_blank', rel: 'noopener', style: 'text-decoration:none' }, 'Open big screen'),
+        h('a', { class: 'btn small', href: '/screen?layout=split&s=' + code, target: '_blank', rel: 'noopener', style: 'text-decoration:none' }, 'Open split screen'),
+        h('a', { class: 'btn small', href: '/qrpage?s=' + code, target: '_blank', rel: 'noopener', style: 'text-decoration:none' }, 'Open QR slide'),
+        h('label', { style: 'display:flex;gap:6px;align-items:center;font-size:14px' }, h('input', { type: 'checkbox', id: 'prog', onchange: e => act('progress', { show: e.target.checked }) }), 'Show question number to audience'),
+        h('span', { class: 'muted mono', id: 'conn' }))),
+    h('div', { class: 'host-grid' },
+      h('div', { class: 'panel', id: 'main' }),
+      h('div', { class: 'panel' }, h('h3', { style: 'margin-bottom:8px' }, 'Questions'), h('div', { class: 'jump', id: 'jump' }),
+        h('div', { class: 'row', style: 'margin-top:14px' },
+          h('button', { class: 'btn small', onclick: () => act('prev') }, 'Previous'),
+          h('button', { class: 'btn small danger', onclick: () => confirm('End the session? Voters will see the thank-you screen.') && act('end') }, 'End session')))));
+
+  function render() {
+    const s = st.session;
+    $('#title').textContent = s.name;
+    $('#prog').checked = !!s.showProgress;
+    const chip = $('#chip');
+    chip.replaceChildren(h('span', { class: 'chip ' + (s.phase === 'open' ? 'open' : s.phase === 'closed' ? 'closed' : '') }, s.state === 'live' ? ({ waiting: 'Waiting', open: 'Voting open', closed: 'Voting closed', done: 'Finished' })[s.phase] : s.state));
+    const main = $('#main');
+    const jump = $('#jump');
+    jump.replaceChildren(...(st.questions || []).map((qq, i) => h('button', { class: st.question && qq.id === st.question.id ? 'current' : (st.session.state === 'live' && st.index === i + 1 ? 'current' : ''), onclick: () => act('goto', { questionId: qq.id }) }, `${i + 1}. ${qq.text}`)));
+
+    let label, action, kind = 'primary';
+    if (s.state === 'ended') { label = 'Run again from the start'; action = () => act('restart'); kind = ''; }
+    else if (s.state === 'scheduled') { label = 'Go live'; action = () => act('golive'); }
+    else if (s.phase === 'waiting') { label = 'Open voting'; action = () => act('open'); }
+    else if (s.phase === 'open') { label = 'Close voting and show results'; action = () => act('close'); }
+    else if (s.phase === 'closed') { label = st.index >= st.total ? 'Finish poll' : 'Next question'; action = () => act('next'); }
+    else { label = 'Poll finished. Run again'; action = () => act('restart'); kind = ''; }
+
+    const extra = [];
+    if (s.state === 'live' && s.phase === 'closed') extra.push(h('button', { class: 'btn small', style: 'margin-top:10px', onclick: () => act('open') }, 'Reopen voting'));
+
+    if (s.state === 'live' && st.question) {
+      if (shownQ !== st.question.id) {
+        shownQ = st.question.id;
+        const wrap = h('div', { class: 'bars host-bars' });
+        main.replaceChildren(
+          h('div', { class: 'muted mono' }, `Question ${st.index} of ${st.total}`),
+          h('div', { class: 'host-q' }, st.question.text),
+          h('button', { class: 'btn big-action ' + kind, id: 'act' }, label), ...extra,
+          h('p', { class: 'mono muted', id: 'votes', style: 'margin:14px 0' }), wrap, h('p', { class: 'err-text', id: 'err', role: 'alert' }));
+        barsApi = createBars(wrap, st.question.options, { showCounts: true });
+      } else {
+        $('#act').textContent = label;
+        $('#act').className = 'btn big-action ' + kind;
+        main.querySelectorAll('button:not(#act)').forEach(b => b.remove());
+        $('#act').after(...extra);
+      }
+      $('#act').onclick = action;
+      if (st.tally) $('#votes').textContent = total(barsApi.update(st.tally.counts));
+    } else {
+      shownQ = null; barsApi = null;
+      main.replaceChildren(
+        h('p', { class: 'host-q' }, s.state === 'scheduled' ? 'Ready when you are.' : s.state === 'ended' ? 'This session has ended.' : 'No question selected.'),
+        h('p', { class: 'muted' }, s.state === 'scheduled' ? 'Voters who scan now see a “starting soon” page. Go live when the talk begins.' : ''),
+        h('button', { class: 'btn big-action ' + kind, id: 'act', onclick: action }, label), h('p', { class: 'err-text', id: 'err', role: 'alert' }));
+    }
+  }
+}
+</script>
+</body>
+</html>
