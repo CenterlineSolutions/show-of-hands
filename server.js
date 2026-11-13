@@ -27,6 +27,7 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'same-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet, noimageindex'); // keep every page, API response and image out of search engines and AI indexes
   if (SECURE_COOKIE) res.setHeader('Strict-Transport-Security', 'max-age=15552000');
   res.setHeader('Content-Security-Policy', CSP.concat(embeddable ? 'frame-ancestors *' : "frame-ancestors 'none'").join('; '));
   if (!embeddable) res.setHeader('X-Frame-Options', 'DENY');
