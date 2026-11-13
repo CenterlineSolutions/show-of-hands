@@ -60,7 +60,7 @@ You need Node.js, a way to keep it running, and a web server that provides HTTPS
 
 1. Upload the app, then `npm install --omit=dev`.
 2. Run `node seed.js` once with `DB_PATH` set to a folder outside your website's public folder.
-3. Keep it running with a process manager such as [pm2](https://pm2.keymetrics.io/). See `ecosystem.config.js` for an example (it starts the app as `show-of-hands`). Set `PUBLIC_URL` and `DB_PATH` there.
+3. Keep it running with a process manager such as [pm2](https://pm2.keymetrics.io/). See `ecosystem.config.js` for an example (it starts the app as `show-of-hands`). Set `PUBLIC_URL` and `DB_PATH` there. Run `pm2 save` once it is running, so the process list can be restored after a reboot (see "Keep it running after a reboot" below).
 4. Put a web server in front, with HTTPS. The app only listens on `127.0.0.1`.
 
 **Nginx**
@@ -92,7 +92,20 @@ The proxy must pass the visitor's real address in `X-Forwarded-For`. The app use
 
 **No root access?** Install Node with [nvm](https://github.com/nvm-sh/nvm) in your home folder, and use cron instead of `pm2 startup`: add `@reboot` with a command that loads nvm and runs `pm2 resurrect`.
 
-**Updating:** upload the new files over the old ones (leave your `ecosystem.config.js` and database alone) and run `pm2 restart`. Sign-ins and votes survive restarts. Take a copy of the app folder first so you can roll back.
+**Keep it running after a reboot**
+
+A hosting provider may restart your server for updates, and pm2 does not bring your app back by itself. `pm2 resurrect` only restores what `pm2 save` last wrote, so run `pm2 save` after every change to what pm2 is running. With root, `pm2 startup` installs the boot service and prints one command to run. Without root, use cron with full paths, because cron starts with a bare environment (find them with `which pm2 node`):
+
+```
+@reboot sleep 20 && PATH=/path/to/node/bin:$PATH /path/to/pm2 resurrect
+*/5 * * * * PATH=/path/to/node/bin:$PATH /path/to/pm2 pid APP_NAME | grep -q '[1-9]' || PATH=/path/to/node/bin:$PATH /path/to/pm2 resurrect
+```
+
+Use your app's pm2 name for `APP_NAME`. Keep only one `@reboot` line. The second line checks every five minutes and restarts the app if it is down. To test it, run `pm2 stop APP_NAME`, wait five minutes, then run `pm2 list` and look for `online`.
+
+After any restart, confirm the app listens on the local address only. `ss -ltnp | grep 3000` should show `127.0.0.1:3000`, not `*:3000` or `0.0.0.0:3000`. If it shows `*`, the app is reachable from the internet without HTTPS. Update to the current `server.js`, which binds to `127.0.0.1` by default.
+
+**Updating:** upload the new files over the old ones (leave your `ecosystem.config.js` and database alone) and run `pm2 restart`. Sign-ins and votes survive restarts. Take a copy of the app folder first so you can roll back. Update `server.js`, `db.js` and everything in `public/` together, because they are written to match each other. Compare `sha256sum` output against a known-good copy to see which files differ. Copy the database files (`.db`, `-wal`, `-shm`) while the app is stopped before changing `db.js`.
 
 ## Security
 
@@ -103,6 +116,7 @@ Built in:
 - Content security policy, anti-framing (except the big screen, which can be embedded), `nosniff`, referrer and permissions policies, and HSTS over HTTPS.
 - All SQL uses placeholders and pages never build HTML from user text. Uploaded SVG logos are served sandboxed.
 - The app binds to `127.0.0.1` only. Error responses never include stack traces.
+- Every response carries `X-Robots-Tag: noindex, nofollow, noarchive, nosnippet, noimageindex`, which asks search engines and AI crawlers not to index, cache or copy any page, API response or image. No `robots.txt` is needed. This only affects crawlers that honor it; to refuse scrapers outright, block their user agents in your web server.
 
 Your part:
 - Use a long admin password (a few random words works well), and keep Node.js on a supported version.
@@ -121,6 +135,8 @@ With the server running:
 ```bash
 ADMIN_PASSWORD='...' node loadtest.js 300     # voting rules, polling fallback, 300 simultaneous voters
 ```
+
+Before an event, run it on the server against the local address (`BASE=http://127.0.0.1:3000`) when nobody is using the poll. It sends every vote from one address, so it also checks that your `MAX_VOTES_PER_IP` setting suits a room sharing one network. Memory use was about 90 MB at 300 voters.
 
 The security checks need a server started with a small vote cap and its own throwaway database:
 
